@@ -35,6 +35,7 @@ of approximately 200 lines of code.
 Prerequisites: Git, Python 3.10 or later including dev headers, Pip and [venv](https://docs.python.org/3/library/venv.html) library, C compiler (for building [janus-swi](https://pypi.org/project/janus-swi/) library)
 
 Under Ubuntu one can use the following command to install prerequisites:
+
 ```
 sudo apt-get install git python3 python3-dev python3-pip python3-venv build-essential
 ```
@@ -42,6 +43,7 @@ sudo apt-get install git python3 python3-dev python3-pip python3-venv build-esse
 Get [SWI-Prolog 10.0.2 or later](https://www.swi-prolog.org/).
 
 Install OmegaClaw:
+
 ```
 git clone https://github.com/trueagi-io/PeTTa
 cd PeTTa
@@ -52,20 +54,24 @@ cp repos/OmegaClaw-Core/run.metta ./
 ```
 
 Setup Python virtual environment (or use your own):
+
 ```
 python3 -m venv ./.venv
 source ./.venv/bin/activate
 ```
 
 If you have CPU only machine or don't want calculate embeddings on GPU:
+
 ```
 python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch
 ```
 
 Install Python dependencies:
+
 ```
 python3 -m pip install -r ./repos/OmegaClaw-Core/requirements.txt
 ```
+
 ---
 
 ## Run OmegaClaw in Docker
@@ -73,26 +79,31 @@ python3 -m pip install -r ./repos/OmegaClaw-Core/requirements.txt
 Ensure that you have [Docker installed](https://docs.docker.com/engine/install/)
 
 Run OmegaClaw using the next command:
+
 ```
 curl -fsSL https://raw.githubusercontent.com/asi-alliance/OmegaClaw-Core/refs/heads/main/scripts/omegaclaw | bash -s -- singularitynet/omegaclaw:latest
 ```
 
 To run a specific version of OmegaClaw set version in `TAG` environment variable and run the following command:
+
 ```
 export TAG=v0.1.17; curl -fsSL  https://github.com/asi-alliance/OmegaClaw-Core/raw/refs/tags/$TAG/scripts/omegaclaw | bash -s -- singularitynet/omegaclaw:$TAG
 ```
 
 To stop the OmegaClaw Docker container:
+
 ```
 docker stop omegaclaw
 ```
 
 To restart the OmegaClaw Docker container:
+
 ```
 docker start omegaclaw
 ```
 
 To reset OmegaClaw's memory:
+
 ```
 docker volume rm omegaclaw-memory
 ```
@@ -106,15 +117,17 @@ Before running the system you need to choose your LLM API provider and export th
 |---|---|---|
 | `Anthropic` (default) | `ANTHROPIC_API_KEY` | Claude models via the Anthropic API. |
 | `OpenAI` | `OPENAI_API_KEY` | GPT models. Also reused by the OpenAI embedding provider below. |
-| `ASICloud` | `ASI_API_KEY` |  MiniMax models via ASI Alliance inference endpoint (`inference.asicloud.cudos.org`). |
-| `ASIOne` | `ASIONE_API_KEY` |  ASI1 Ultra model via ASI:One inference endpoint (`https://api.asi1.ai/v1`). |
-| `OpenAIAPI` | `OPENAIAPI_API_KEY` |  Use OpenAI API with any endpoint and model. API endpoint and model are set via `openaiapi_url` and `model` command line parameters. |
-| `OpenRouter` | `OPENROUTER_API_KEY` |  GLM model via OpenRouter inference endpoint. |
+| `ASICloud` | `ASI_API_KEY` | MiniMax models via ASI Alliance inference endpoint (`inference.asicloud.cudos.org`). |
+| `ASIOne` | `ASIONE_API_KEY` | ASI1 Ultra model via ASI:One inference endpoint (`https://api.asi1.ai/v1`). |
+| `OpenAIAPI` | `OPENAIAPI_API_KEY` | Use OpenAI API with any endpoint and model. API endpoint and model are set via `openaiapi_url` and `model` command line parameters. |
+| `OpenRouter` | `OPENROUTER_API_KEY` | GLM model via OpenRouter inference endpoint. |
 
 Run the system via the following command which ensures the system is started from the root folder of PeTTa:
+
 ```
 OMEGACLAW_AUTH_SECRET=<channel-secret> sh run.sh run.metta IRC_channel="<irc-channel>"
 ```
+
 After start go to https://webchat.quakenet.org/ to communicate with the agent. Join `<irc-channel>` and after agent is joined send `auth <channel-secret>` message to authenticate yourself as an agent owner. Please replace `<irc-channel>` and `<channel-secret>` by your own values.
 
 ### Import Knowledge
@@ -124,9 +137,11 @@ If you are running OmegaClaw without Docker and would like to load it with prese
 1. Set EMBEDDING_PROVIDER in your environment. It can be set to either OpenAI or Local. OpenAI embeddings also require OPENAI_API_KEY to be set in your environment.
 
 2. Run:
+
 ```
   sh ./import_knowledge.sh
 ```
+
 After the script finishes, your OmegaClaw bot will have the preset knowledge stored in its long-term memory (LTM).
 
 If you want to skip preloading the knowledge then run `export IMPORT_KB_ON_START=0`
@@ -135,6 +150,7 @@ If you want to skip preloading the knowledge then run `export IMPORT_KB_ON_START
 
 These are the following sources of the configuration parameters for the
 OmegaClaw agent:
+
 - command line parameters
 - environment variables
 - configuration file
@@ -148,6 +164,7 @@ list of parameters with descriptions and default values can be found in
 [default configuration file](/config/config.yaml).
 
 The configuration file location can be specified manually using `config` option:
+
 ```sh
 sh run.sh run.metta config=<config.yaml path>
 ```
@@ -156,11 +173,11 @@ The LLM API keys (see [table above](#usage)) and communication channel tokens
 from the table below are passed via environment variables (without `OMEGACLAW_`
 prefix) to prevent agent accessing them.
 
-| Environment variable | Meaning |
-|---|---|
-| `TG_BOT_TOKEN` | Telegram bot token. |
-| `MM_BOT_TOKEN` | Mattermost bot token. |
-| `SL_BOT_TOKEN` | Slack bot token (`xoxb-...`). |
+| Environment variable | Meaning                       |
+| -------------------- | ----------------------------- |
+| `TG_BOT_TOKEN`       | Telegram bot token.           |
+| `MM_BOT_TOKEN`       | Mattermost bot token.         |
+| `SL_BOT_TOKEN`       | Slack bot token (`xoxb-...`). |
 
 ---
 

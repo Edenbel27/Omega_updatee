@@ -14,6 +14,8 @@ from config import config_get_by_key
 CHROMA_DB_PATH = os.environ.get("CHROMA_DB_PATH", "./chroma_db")
 FRAME_SKETCH_COLLECTION_BASE = os.environ.get("FRAME_SKETCH_COLLECTION", "cfv2_frame_sketches")
 FRAME_EMBED_MODEL = os.environ.get("FRAME_EMBED_MODEL", "text-embedding-3-large")
+DUPLICATE_DISTANCE_OPENAI = float(os.environ.get("FRAME_DUPLICATE_DISTANCE_OPENAI", "0.15"))
+DUPLICATE_DISTANCE_LOCAL = float(os.environ.get("FRAME_DUPLICATE_DISTANCE_LOCAL", "0.10"))
 
 _chroma_client = None
 _collections: dict[str, Any] = {}
@@ -189,20 +191,17 @@ def _parse_frame_sketches(compact_frames_repr: str) -> list[dict[str, Any]]:
             "results": _compact(_first_field(expr, ["results"], ""), 900),
             "source": _sym(_first_field(expr, ["source"], "")),
             "mode": _sym(_first_field(expr, ["mode", "frame-mode"], "")),
+            "dependencies": _compact(_first_field(expr, ["dependencies"], ""), 900),
         })
     return frames
 
 
 def _frame_document(frame: dict[str, Any]) -> str:
-    # This exact text is embedded and stored.
+    # Embed meaning-bearing content; structural fields remain separate evidence.
     return (
-        f"(Frame "
-        f"(frameID {frame['frameID']}) "
-        f"(parentID {frame['parentID']}) "
-        f"(status {frame['status']}) "
-        f"(priority {frame['priority']}) "
-        f"(deliverable {frame['deliverable']}) "
-        f"(results {frame['results']}))"
+        f"Task: {frame['deliverable']}. "
+        f"Results: {frame['results']}. "
+        f"Dependencies: {frame['dependencies']}."
     )
 
 
@@ -214,6 +213,7 @@ def _frame_metadata(frame: dict[str, Any], provider: str, content_hash: str) -> 
         "priority": float(frame["priority"]),
         "source": frame["source"],
         "mode": frame["mode"],
+        "dependencies": frame["dependencies"],
         "embeddingProvider": provider,
         "contentHash": content_hash,
     }
@@ -378,10 +378,16 @@ def _search_top_k(query_frame: dict[str, Any], query_embedding: list[float], pro
             "document": doc,
             "metadata": meta or {},
             "distance": float(distance),
+            "semanticScore": _semantic_score_from_distance(float(distance)),
         })
         if len(hits) >= int(top_k):
             break
     return hits
+
+
+def _semantic_score_from_distance(distance: float) -> float:
+    """Convert Chroma cosine distance into bounded evidence for the reasoner."""
+    return max(0.0, min(1.0, 1.0 - (float(distance) / 2.0)))
 
 
 # -----------------------------------------------------------------------------
@@ -457,7 +463,74 @@ Rules:
         return json.loads(match.group(0)) if match else {"relations": []}
 
 
-def _classify_relations(query_frame: dict[str, Any], hits: list[dict[str, Any]], relation_classes: list[str]) -> list[dict[str, Any]]:
+def _candidate_from_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    metadata = hit.get("metadata") or {}
+    return {
+        "frameID": str(hit["frameID"]),
+        "parentID": str(metadata.get("parentID", "")),
+        "status": str(metadata.get("status", "")),
+        "priority": _float(metadata.get("priority", 0.0)),
+        "source": str(metadata.get("source", "")),
+        "mode": str(metadata.get("mode", "")),
+        "dependencies": str(metadata.get("dependencies", "")),
+        "deliverable": "",
+        "results": str(hit.get("document", "")),
+        "semanticScore": _float(hit.get("semanticScore", 0.0)),
+    }
+
+
+def _duplicate_distance_threshold(provider: str) -> float:
+    if _provider_name(provider).lower() == "local":
+        return DUPLICATE_DISTANCE_LOCAL
+    return DUPLICATE_DISTANCE_OPENAI
+
+
+def _classify_relations_vector(
+    hits: list[dict[str, Any]],
+    relation_classes: list[str],
+    provider: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Resolve near-identical prose before symbolic and LLM classification."""
+    if "DuplicateOf" not in relation_classes:
+        return [], hits
+
+    threshold = _duplicate_distance_threshold(provider)
+    resolved = []
+    unresolved = []
+    for hit in hits:
+        distance = float(hit["distance"])
+        if distance < threshold:
+            resolved.append({
+                "frameID1": "",
+                "frameID2": str(hit["frameID"]),
+                "class": "DuplicateOf",
+                "reason": "embedding distance is below the duplicate threshold",
+                "confidence": max(0.0, min(1.0, 1.0 - distance)),
+            })
+        else:
+            unresolved.append(hit)
+    return resolved, unresolved
+
+
+def _classify_relations_nal(
+    query_frame: dict[str, Any],
+    hits: list[dict[str, Any]],
+    relation_classes: list[str],
+) -> list[dict[str, Any]]:
+    """Ask the optional Python/PeTTa adapter to run the real NAL rules."""
+    try:
+        from frame_nal import infer_relations
+        candidates = [_candidate_from_hit(hit) for hit in hits]
+        return infer_relations(query_frame, candidates, relation_classes)
+    except (ImportError, RuntimeError):
+        return []
+
+
+def _classify_relations_llm(
+    query_frame: dict[str, Any],
+    hits: list[dict[str, Any]],
+    relation_classes: list[str],
+) -> list[dict[str, Any]]:
     if not hits:
         return []
 
@@ -516,6 +589,55 @@ def _classify_relations(query_frame: dict[str, Any], hits: list[dict[str, Any]],
             "confidence": confidence,
         })
     return clean
+
+
+def _classify_relations(
+    query_frame: dict[str, Any],
+    hits: list[dict[str, Any]],
+    relation_classes: list[str],
+    provider: str,
+) -> list[dict[str, Any]]:
+    if not hits:
+        return []
+
+    vector_relations, unresolved = _classify_relations_vector(
+        hits,
+        relation_classes,
+        provider,
+    )
+    for relation in vector_relations:
+        relation["frameID1"] = query_frame["frameID"]
+
+    nal_relations = _classify_relations_nal(
+        query_frame,
+        unresolved,
+        relation_classes,
+    )
+
+    allowed = set(relation_classes)
+    nal_relations = [
+        relation for relation in nal_relations
+        if relation.get("class") in allowed
+    ]
+    resolved_ids = {
+        str(relation.get("frameID2"))
+        for relation in nal_relations
+    }
+    unresolved = [
+        hit for hit in unresolved
+        if str(hit["frameID"]) not in resolved_ids
+    ]
+
+    if unresolved:
+        nal_relations.extend(
+            _classify_relations_llm(
+                query_frame,
+                unresolved,
+                relation_classes,
+            )
+        )
+
+    return vector_relations + nal_relations
 
 
 def _relations_to_sexpr(relations: list[dict[str, Any]]) -> str:
@@ -592,5 +714,5 @@ def cfv2_compose_frame_relations(
     if not hits:
         return "()"
 
-    relations = _classify_relations(query_frame, hits, relation_classes)
+    relations = _classify_relations(query_frame, hits, relation_classes, provider)
     return _relations_to_sexpr(relations)
