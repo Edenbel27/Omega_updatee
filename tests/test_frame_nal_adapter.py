@@ -451,3 +451,154 @@ def test_compose_frame_relations_serializes_end_to_end_result(monkeypatch):
     assert calls == [("Current", "History", "Local")]
     assert "(Class RelatedButSeparate)" in result
     assert "(Confidence 0.8000)" in result
+
+
+def test_ontology_evidence_prefers_exact_terms_and_task_fields():
+    exact = frame_nal._content_evidence({
+        "deliverable": "authentication failure",
+        "results": "",
+        "dependencies": "",
+    })
+    alias = frame_nal._content_evidence({
+        "deliverable": "login error",
+        "results": "",
+        "dependencies": "",
+    })
+    result_only = frame_nal._content_evidence({
+        "deliverable": "",
+        "results": "login error",
+        "dependencies": "",
+    })
+
+    assert exact["authentication"] > alias["authentication"]
+    assert alias["authentication"] > result_only["authentication"]
+
+
+def test_unknown_words_are_retained_as_lower_confidence_concepts():
+    evidence = frame_nal._content_evidence({
+        "deliverable": "quantumcache latency",
+        "results": "",
+        "dependencies": "",
+    })
+
+    assert evidence["quantumcache"] == pytest.approx(0.60)
+    assert evidence["latency"] == pytest.approx(0.60)
+
+
+def test_content_proposition_facts_include_marker_and_weighted_evidence():
+    facts = frame_nal._content_proposition_facts(
+        {"frameID": "Current", "deliverable": "revert deployment change"},
+        {"frameID": "History", "deliverable": "implement deployment change"},
+    )
+
+    assert "(content-proposition Current History supersedes)" in facts
+    assert any(
+        "content-proposition Current History supersedes" in fact
+        and "(stv 1.0" in fact
+        for fact in facts
+    )
+
+
+def test_nal_truth_parser_and_confidence_aggregation():
+    conclusions = frame_nal._parse_nal_conclusions(
+        "(((--> A B) (stv 0.9 0.54)) ((--> C D) (stv 1.0 0.80)))"
+    )
+
+    assert conclusions == [(0.9, 0.54), (1.0, 0.80)]
+    assert frame_nal._aggregate_nal_confidence(conclusions, 3) == pytest.approx(0.90)
+
+
+def test_frame_facts_and_query_encode_structural_evidence():
+    frame = _frame("Current", parent="History", dependencies="Dependency")
+    facts = frame_nal._frame_facts(frame)
+    query = frame_nal.build_query(frame, _frame("History"))
+
+    assert any("(parent History)" in fact for fact in facts)
+    assert any("(depends Dependency)" in fact for fact in facts)
+    assert "classify-frame-pair Current History" in query
+    assert "(semantic History)" in query
+
+
+def test_frame_facts_omit_optional_parent_and_dependencies_when_missing():
+    facts = frame_nal._frame_facts({"frameID": "Current"})
+
+    assert not any("(parent " in fact for fact in facts)
+    assert not any("(depends " in fact for fact in facts)
+
+
+def test_relation_deduplication_keeps_highest_confidence():
+    result = frame_nal._deduplicate_relations([
+        {"frameID1": "A", "frameID2": "B", "class": "RelatedButSeparate", "confidence": 0.4},
+        {"frameID1": "A", "frameID2": "B", "class": "RelatedButSeparate", "confidence": 0.8},
+    ])
+
+    assert result == [{
+        "frameID1": "A",
+        "frameID2": "B",
+        "class": "RelatedButSeparate",
+        "confidence": 0.8,
+    }]
+
+
+def test_frame_relation_helpers_handle_partial_frames():
+    partial = {"frameID": "Current", "deliverable": "task"}
+
+    assert "Task: task." in frame_relation._frame_document(partial)
+    metadata = frame_relation._frame_metadata(partial, "Local", "hash")
+    assert metadata["priority"] == 0.0
+    assert metadata["status"] == "UNKNOWN"
+    assert metadata["contentHash"] == "hash"
+
+
+def test_frame_parser_accepts_alias_fields_and_skips_missing_ids():
+    frames = frame_relation._parse_frame_sketches(
+        '((Frame (frameID A) (parent-frameID B) (frame-mode Slow) '
+        '(deliverables ("task")) (dependencies (Dep)))) '
+        '((Frame (status Active)))'
+    )
+
+    assert len(frames) == 1
+    assert frames[0]["frameID"] == "A"
+    assert frames[0]["parentID"] == "B"
+    assert frames[0]["mode"] == "Slow"
+
+
+def test_vector_thresholds_differ_by_provider():
+    assert frame_relation._duplicate_distance_threshold("OpenAI") == pytest.approx(0.15)
+    assert frame_relation._duplicate_distance_threshold("Local") == pytest.approx(0.10)
+
+
+def test_search_returns_empty_for_empty_vector_or_single_record(monkeypatch):
+    assert frame_relation._search_top_k({"frameID": "A"}, [], "Local", 5) == []
+
+    class Collection:
+        def count(self):
+            return 1
+
+    monkeypatch.setattr(frame_relation, "_get_collection", lambda provider: Collection())
+    assert frame_relation._search_top_k({"frameID": "A"}, [0.1], "Local", 5) == []
+
+
+def test_llm_result_sanitization_filters_unknown_ids_and_clamps_confidence(monkeypatch):
+    monkeypatch.setattr(
+        frame_relation,
+        "_call_classifier_llm",
+        lambda payload: {"relations": [
+            {"frameID1": "Wrong", "frameID2": "History", "class": "FollowUp", "reason": "ok", "confidence": 2.0},
+            {"frameID1": "Current", "frameID2": "Unknown", "class": "FollowUp", "reason": "drop", "confidence": 0.5},
+        ]},
+    )
+
+    result = frame_relation._classify_relations_llm(
+        {"frameID": "Current", "parentID": "", "status": "Active", "priority": 1.0, "deliverable": "task", "results": ""},
+        [{"frameID": "History", "distance": 0.4, "document": "old", "metadata": {}}],
+        ["FollowUp"],
+    )
+
+    assert result == [{
+        "frameID1": "Current",
+        "frameID2": "History",
+        "class": "FollowUp",
+        "reason": "ok",
+        "confidence": 1.0,
+    }]

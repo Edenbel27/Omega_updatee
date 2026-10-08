@@ -273,7 +273,7 @@ def _content_evidence(frame: dict[str, Any]) -> dict[str, float]:
             concept = _ONTOLOGY.get(word, word)
             alias_strength = _ONTOLOGY_ALIAS_STRENGTH.get(
                 word,
-                0.95 if word == concept else 0.60,
+                0.95 if word in _ONTOLOGY and word == concept else 0.60,
             )
             score = min(0.95, field_weight * alias_strength)
             evidence[concept] = max(evidence.get(concept, 0.0), score)

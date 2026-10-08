@@ -426,8 +426,14 @@ The test file currently covers:
 The latest focused result is:
 
 ```text
-24 passed
+36 passed
 ```
+
+The suite is offline and deterministic: it mocks embedding, Chroma, and LLM
+boundaries where appropriate. It still uses the configured local PeTTa runtime
+to verify the actual MeTTa/NAL rules. Live OpenAI embeddings, live local model
+inference, persistent Chroma storage, and a live chat-provider call are not
+required by this test file.
 
 The suite does not yet replace an end-to-end test through
 [`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699) with a live or mocked Chroma collection and an asserted LLM fallback call. That is the next integration-level test to add.
