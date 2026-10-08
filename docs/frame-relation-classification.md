@@ -102,14 +102,12 @@ implementation adds these layers before the LLM fallback:
 5. [`build_query()`](../src/frame_nal.py#L348) converts structural fields into
    MeTTa facts.
 6. [`frame_nal.metta`](../frame_nal.metta) applies structural relation rules.
-7. [`_content_evidence()`](../src/frame_nal.py#L253) maps synonyms to canonical
-   concepts and calculates evidence strength.
+7. [`_content_evidence()`](../src/frame_nal.py#L253) maps synonyms to canonical concepts and calculates evidence strength.
 8. [`_content_proposition_facts()`](../src/frame_nal.py#L287) grounds content
    into propositions such as `continues`, `supersedes`, and `same-failure`.
 9. [`infer_content_relations()`](../src/frame_nal.py#L178) invokes real NAL
    inference through `(|- ...)` and bounded ontology chains.
-10. [`_select_preferred_relations()`](../src/frame_relation.py#L658) chooses the
-    strongest category when multiple relations apply.
+10. [`_select_preferred_relations()`](../src/frame_relation.py#L658) chooses the strongest category when multiple relations apply.
 11. [`_classify_relations_llm()`](../src/frame_relation.py#L544) handles only
     unresolved candidates.
 
@@ -117,8 +115,7 @@ implementation adds these layers before the LLM fallback:
 
 ### Semantic document
 
-[`_frame_document()`](../src/frame_relation.py#L214) in `src/frame_relation.py` creates the text sent to the
-embedding provider:
+[`_frame_document()`](../src/frame_relation.py#L214) in `src/frame_relation.py` creates the text sent to the embedding provider:
 
 ```text
 Task: Fix authentication timeout.
@@ -156,21 +153,18 @@ lib_llm_ext.useLocalEmbedding(text)
 
 The embedding model converts the semantic document into a numeric vector.
 ChromaDB stores the vector and returns nearby historical vectors when a new
-frame is queried. The vector identifies candidates; it does not directly decide
-whether the relation is `FollowUp`, `Blocks`, or `Supersedes`.
+frame is queried. The vector identifies candidates; it does not directly decide whether the relation is `FollowUp`, `Blocks`, or `Supersedes`.
 
 ### Vector duplicate tier
 
-[`_classify_relations_vector()`](../src/frame_relation.py#L503) checks retrieved Chroma distances before running
-symbolic or LLM classification. The configurable thresholds are:
+[`_classify_relations_vector()`](../src/frame_relation.py#L503) checks retrieved Chroma distances before running symbolic or LLM classification. The configurable thresholds are:
 
 ```text
 FRAME_DUPLICATE_DISTANCE_OPENAI=0.15
 FRAME_DUPLICATE_DISTANCE_LOCAL=0.10
 ```
 
-A candidate below the selected threshold is classified as `DuplicateOf`, with a
-confidence derived from its distance, and is removed from the unresolved set.
+A candidate below the selected threshold is classified as `DuplicateOf`, with a confidence derived from its distance, and is removed from the unresolved set.
 
 The current conversion from distance to semantic score is:
 
@@ -179,8 +173,7 @@ The current conversion from distance to semantic score is:
 ```
 
 This is a bounded heuristic, not an NAL formula. It assumes a distance range
-approximately from `0` to `2`; the Chroma metric should be explicitly confirmed
-and calibrated before treating the score as a scientific probability.
+approximately from `0` to `2`; the Chroma metric should be explicitly confirmed and calibrated before treating the score as a scientific probability.
 
 ## Chroma Metadata and Content Hashing
 
@@ -292,8 +285,7 @@ The adapter creates NAL premises:
 
 ### Actual `lib_nal.metta` inference
 
-For every grounded shared concept, [`infer_content_relations()`](../src/frame_nal.py#L178) invokes the
-actual NAL operator loaded from `lib_nal.metta`:
+For every grounded shared concept, [`infer_content_relations()`](../src/frame_nal.py#L178) invokes the actual NAL operator loaded from `lib_nal.metta`:
 
 ```metta
 !(|-
@@ -423,9 +415,7 @@ The latest focused result is:
 ```
 
 The suite does not yet replace an end-to-end test through
-[`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699) with a live or
-mocked Chroma collection and an asserted LLM fallback call. That is the next
-integration-level test to add.
+[`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699) with a live or mocked Chroma collection and an asserted LLM fallback call. That is the next integration-level test to add.
 
 ## Next Symbolic Reasoning Work
 
