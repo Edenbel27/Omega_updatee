@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import pathlib
+import sys
+
 import pytest
 
+
+_OMEGA_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.append(str(_OMEGA_ROOT / "providers"))
 
 frame_nal = pytest.importorskip("frame_nal")
 
@@ -86,6 +92,70 @@ def test_dependency_and_blocking_rules():
 
     classes = {relation["class"] for relation in result}
     assert {"DependsOn", "Blocks"} <= classes
+
+
+def test_content_propositions_infer_parentless_follow_up():
+    result = frame_nal.infer_relations(
+        _frame("Current") | {
+            "deliverable": "continue implementing authentication fix",
+        },
+        [_frame("History", status="Completed") | {
+            "deliverable": "investigate authentication failure",
+        }],
+        ["FollowUp"],
+    )
+
+    assert result[0]["class"] == "FollowUp"
+    assert "continues prior work" in result[0]["reason"]
+
+
+def test_content_propositions_infer_supersedes():
+    result = frame_nal.infer_relations(
+        _frame("Current") | {
+            "deliverable": "revert deployment change",
+        },
+        [_frame("History", status="Completed") | {
+            "deliverable": "implement deployment change",
+        }],
+        ["Supersedes"],
+    )
+
+    assert result[0]["class"] == "Supersedes"
+
+
+def test_content_propositions_infer_same_failure_cluster():
+    result = frame_nal.infer_relations(
+        _frame("Current") | {
+            "deliverable": "fix authentication failure",
+        },
+        [_frame("History") | {
+            "deliverable": "investigate authentication failure",
+        }],
+        ["SameFailureCluster"],
+    )
+
+    assert result[0]["class"] == "SameFailureCluster"
+
+
+def test_relation_precedence_selects_strongest_category():
+    from frame_relation import _select_preferred_relations
+
+    result = _select_preferred_relations([
+        {
+            "frameID1": "Current",
+            "frameID2": "History",
+            "class": "SubgoalOf",
+            "confidence": 1.0,
+        },
+        {
+            "frameID1": "Current",
+            "frameID2": "History",
+            "class": "FollowUp",
+            "confidence": 0.8,
+        },
+    ])
+
+    assert [relation["class"] for relation in result] == ["FollowUp"]
 
 
 def test_relation_text_parser_preserves_reason():

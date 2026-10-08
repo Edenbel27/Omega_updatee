@@ -17,6 +17,21 @@ FRAME_EMBED_MODEL = os.environ.get("FRAME_EMBED_MODEL", "text-embedding-3-large"
 DUPLICATE_DISTANCE_OPENAI = float(os.environ.get("FRAME_DUPLICATE_DISTANCE_OPENAI", "0.15"))
 DUPLICATE_DISTANCE_LOCAL = float(os.environ.get("FRAME_DUPLICATE_DISTANCE_LOCAL", "0.10"))
 
+RELATION_PRECEDENCE = {
+    "DuplicateOf": 100,
+    "Supersedes": 95,
+    "FollowUp": 90,
+    "SubgoalOf": 80,
+    "ParentOf": 75,
+    "Blocks": 70,
+    "DependsOn": 65,
+    "ContinuationOf": 60,
+    "SameFailureCluster": 55,
+    "SameProject": 50,
+    "RelatedButSeparate": 20,
+    "Unrelated": 0,
+}
+
 _chroma_client = None
 _collections: dict[str, Any] = {}
 _openai_client = None
@@ -637,7 +652,28 @@ def _classify_relations(
             )
         )
 
-    return vector_relations + nal_relations
+    return _select_preferred_relations(vector_relations + nal_relations)
+
+
+def _select_preferred_relations(
+    relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return one strongest category for each frame pair."""
+    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    for relation in relations:
+        key = (
+            str(relation.get("frameID1", "")),
+            str(relation.get("frameID2", "")),
+        )
+        previous = selected.get(key)
+        current_rank = RELATION_PRECEDENCE.get(str(relation.get("class")), -1)
+        previous_rank = RELATION_PRECEDENCE.get(str(previous.get("class")), -1) if previous else -1
+        if previous is None or (current_rank, float(relation.get("confidence", 0.0))) > (
+            previous_rank,
+            float(previous.get("confidence", 0.0)),
+        ):
+            selected[key] = relation
+    return list(selected.values())
 
 
 def _relations_to_sexpr(relations: list[dict[str, Any]]) -> str:

@@ -68,24 +68,56 @@ A candidate resolved by an earlier tier is not sent to the later tier for the
 same category. The external interface remains compatible with the existing
 MeTTa caller.
 
-The call originates in `src/context.metta`, which calls
-`cfv2_compose_frame_relations()` in `src/frame_relation.py`.
+The call originates in [`src/context.metta`](../src/context.metta#L515), which
+calls [`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699) in
+[`src/frame_relation.py`](../src/frame_relation.py).
 
 ## Main Files
 
-| File                              | Responsibility                                                                                                                                                                              |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `src/frame_relation.py`           | Parses frames, builds semantic documents, manages embeddings and ChromaDB, orchestrates the tiers, validates LLM results, and serializes relations.                                         |
-| `src/frame_nal.py`                | Python-to-PeTTa adapter. Loads the external PeTTa runtime and MeTTa files, grounds Python frames as facts, invokes structural rules and real `lib_nal.metta` inference, and parses results. |
-| `frame_nal.metta`                 | Frame-specific MeTTa rules for structural relation classification.                                                                                                                          |
-| `lib_nal.metta`                   | Shared NAL truth functions and inference rules, including deduction, induction, abduction, analogy, revision, and the `                                                                     | -` operator. |
-| `tests/test_frame_nal_adapter.py` | Focused tests for PeTTa loading, structural rules, content reasoning, dependency reasoning, and Relation parsing.                                                                           |
+[`src/frame_relation.py`](../src/frame_relation.py) - Parses frames, builds semantic documents, manages embeddings and ChromaDB, orchestrates the tiers, validates LLM results, and serializes relations. Key functions: [`_parse_frame_sketches()`](../src/frame_relation.py#L187), [`_frame_document()`](../src/frame_relation.py#L214), [`_classify_relations_vector()`](../src/frame_relation.py#L503), [`_classify_relations_llm()`](../src/frame_relation.py#L544), [`_select_preferred_relations()`](../src/frame_relation.py#L658), and [`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699).
+
+[`src/frame_nal.py`](../src/frame_nal.py) - Python-to-PeTTa adapter. Loads the external PeTTa runtime and MeTTa files, grounds Python frames as facts, invokes structural rules and real
+
+[`lib_nal.metta`](../lib_nal.metta) inference, and parses results. Key functions: [`_runtime()`](../src/frame_nal.py#L127), [`infer_relations()`](../src/frame_nal.py#L153), [`infer_content_relations()`](../src/frame_nal.py#L178), [`_content_evidence()`](../src/frame_nal.py#L253), [`_content_proposition_facts()`](../src/frame_nal.py#L287), [`build_query()`](../src/frame_nal.py#L348), and [`_frame_facts()`](../src/frame_nal.py#L395).
+
+[`frame_nal.metta`](../frame_nal.metta) - Frame-specific MeTTa rules for structural and content relation classification.
+
+[`lib_nal.metta`](../lib_nal.metta) - Shared NAL truth functions and inference rules, including deduction, induction, abduction, analogy, revision, and the `|-` operator.
+
+[`tests/test_frame_nal_adapter.py`](../tests/test_frame_nal_adapter.py) - Focused tests for PeTTa loading, structural rules, ontology/content reasoning, dependency reasoning, precedence, and Relation parsing.
+
+## Implementation Changes
+
+The original classifier sent every retrieved candidate to the LLM. The current
+implementation adds these layers before the LLM fallback:
+
+1. [`_parse_frame_sketches()`](../src/frame_relation.py#L187) extracts frame
+   fields, including dependencies.
+2. [`_frame_document()`](../src/frame_relation.py#L214) creates semantic text
+   from task, results, and dependencies.
+3. ChromaDB stores vectors and metadata; content hashing avoids re-embedding
+   unchanged semantic documents.
+4. [`_classify_relations_vector()`](../src/frame_relation.py#L503) detects
+   likely duplicates.
+5. [`build_query()`](../src/frame_nal.py#L348) converts structural fields into
+   MeTTa facts.
+6. [`frame_nal.metta`](../frame_nal.metta) applies structural relation rules.
+7. [`_content_evidence()`](../src/frame_nal.py#L253) maps synonyms to canonical
+   concepts and calculates evidence strength.
+8. [`_content_proposition_facts()`](../src/frame_nal.py#L287) grounds content
+   into propositions such as `continues`, `supersedes`, and `same-failure`.
+9. [`infer_content_relations()`](../src/frame_nal.py#L178) invokes real NAL
+   inference through `(|- ...)` and bounded ontology chains.
+10. [`_select_preferred_relations()`](../src/frame_relation.py#L658) chooses the
+    strongest category when multiple relations apply.
+11. [`_classify_relations_llm()`](../src/frame_relation.py#L544) handles only
+    unresolved candidates.
 
 ## Semantic Embeddings
 
 ### Semantic document
 
-`_frame_document()` in `src/frame_relation.py` creates the text sent to the
+[`_frame_document()`](../src/frame_relation.py#L214) in `src/frame_relation.py` creates the text sent to the
 embedding provider:
 
 ```text
@@ -95,9 +127,7 @@ Dependencies: DatabaseMigration.
 ```
 
 The semantic document focuses on `deliverable`, `results`, and `dependencies`.
-The frame ID, parent ID, status, source, mode, and priority are kept outside the
-main semantic text because they are structural evidence rather than the meaning
-of the task.
+The frame ID, parent ID, status, source, mode, and priority are kept outside the main semantic text because they are structural evidence rather than the meaning of the task.
 
 This separates two questions:
 
@@ -108,8 +138,7 @@ symbolic reasoning: What relation follows from the available evidence?
 
 ### Embedding providers
 
-For the OpenAI provider, `_embed_texts_openai()` calls the configured embedding
-model, whose default is `text-embedding-3-large`:
+For the OpenAI provider, `_embed_texts_openai()` calls the configured embedding model, whose default is `text-embedding-3-large`:
 
 ```python
 client.embeddings.create(
@@ -132,7 +161,7 @@ whether the relation is `FollowUp`, `Blocks`, or `Supersedes`.
 
 ### Vector duplicate tier
 
-`_classify_relations_vector()` checks retrieved Chroma distances before running
+[`_classify_relations_vector()`](../src/frame_relation.py#L503) checks retrieved Chroma distances before running
 symbolic or LLM classification. The configurable thresholds are:
 
 ```text
@@ -170,8 +199,7 @@ embeddingProvider
 contentHash
 ```
 
-`_frame_metadata()` stores these values so a retrieved candidate can be rebuilt
-for symbolic reasoning.
+[`_frame_metadata()`](../src/frame_relation.py#L223) stores these values so a retrieved candidate can be rebuilt for symbolic reasoning.
 
 The embedding input is hashed by `_hash_text()` using SHA-256. The hash includes:
 
@@ -189,7 +217,7 @@ embedding work and API cost; it does not classify relations.
 
 ## Structural Symbolic Reasoning
 
-`src/frame_nal.py` converts known fields into MeTTa facts. Examples include:
+[`_frame_facts()`](../src/frame_nal.py#L395) in `src/frame_nal.py` converts known fields into MeTTa facts. Examples include:
 
 ```metta
 ((--> FrameA (status Active)) (stv 1.0 0.9))
@@ -205,7 +233,7 @@ It also creates pair-level evidence when appropriate:
 ((top-level FrameA) (stv 1.0 0.9))
 ```
 
-`build_query()` sends these facts to:
+[`build_query()`](../src/frame_nal.py#L348) sends these facts to:
 
 ```metta
 !(classify-frame-pair FrameA FrameB Score Facts)
@@ -232,7 +260,7 @@ creates symbolic content evidence.
 
 ### Concept grounding
 
-`_content_concepts()` combines:
+[`_content_evidence()`](../src/frame_nal.py#L253) combines:
 
 - `deliverable`;
 - `results`;
@@ -264,7 +292,7 @@ The adapter creates NAL premises:
 
 ### Actual `lib_nal.metta` inference
 
-For every grounded shared concept, `infer_content_relations()` invokes the
+For every grounded shared concept, [`infer_content_relations()`](../src/frame_nal.py#L178) invokes the
 actual NAL operator loaded from `lib_nal.metta`:
 
 ```metta
@@ -281,16 +309,16 @@ If the embedding score is high but literal words do not overlap, the adapter
 adds a `semantic-neighbor` concept. This allows semantically close frames with
 different wording to enter the NAL content stage.
 
-The current content stage produces `RelatedButSeparate`. It is genuine NAL
-inference over grounded facts, but the grounding is intentionally lightweight:
-it uses shared normalized concepts and embedding-neighbor evidence rather than a
-full natural-language proposition extractor.
+The current content stage can produce `RelatedButSeparate`, content-derived
+`FollowUp`, `Supersedes`, and `SameFailureCluster`. It is genuine NAL inference
+over grounded facts, but the grounding is intentionally lightweight: it uses a
+controlled synonym ontology and phrase cues rather than a full natural-language
+proposition extractor.
 
 ## Python-to-PeTTa Runtime
 
-`src/frame_nal.py` searches for the external PeTTa installation through
-`PETTA_PATH`, then uses the configured fallback path if available. It creates a
-persistent PeTTa runtime and loads:
+[`src/frame_nal.py`](../src/frame_nal.py) searches for the external PeTTa installation through
+`PETTA_PATH`, then uses the configured fallback path if available. It creates a persistent PeTTa runtime and loads:
 
 ```text
 lib_nal.metta
@@ -313,7 +341,7 @@ every candidate pair.
 
 ## LLM Fallback
 
-The existing LLM classifier is retained in `_classify_relations_llm()`. It is
+The existing LLM classifier is retained in [`_classify_relations_llm()`](../src/frame_relation.py#L544). It is
 called only for candidates unresolved by vector and NAL stages.
 
 The LLM remains useful for relations that require deeper prose interpretation,
@@ -348,48 +376,81 @@ opposite relationship is false.
 
 ## Tests
 
-The focused adapter suite is:
+The focused test file is [`tests/test_frame_nal_adapter.py`](../tests/test_frame_nal_adapter.py).
+It directly exercises the Python adapter, the external PeTTa runtime, the
+frame-specific MeTTa rules, and real `lib_nal.metta` content inference.
+
+### Run on Windows
+
+From the `Omega` directory, activate the project environment:
+
+```powershell
+cd C:\Users\lenovo\OneDrive\Desktop\icog\contribution\Task1111\Omega
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+& ..\.venv\Scripts\Activate.ps1
+```
+
+Set the external PeTTa paths for the current terminal:
+
+```powershell
+$env:PETTA_PATH = "C:\Users\lenovo\OneDrive\Desktop\icog\Training\Tr1\disjoint_set_PeTTa_1"
+$env:PYTHONPATH = "$env:PETTA_PATH\python;$PWD;$PWD\src"
+```
+
+Run the focused suite:
 
 ```powershell
 pytest tests/test_frame_nal_adapter.py -q
 ```
 
-It currently covers:
+The test file currently covers:
 
-- parent and follow-up rules;
-- semantic relations with different structural fields;
-- content NAL reasoning without parent fields;
-- embedding-supported reasoning with different wording;
-- dependency and blocking rules;
-- Relation parsing.
+- [`test_parent_and_follow_up_rules()`](../tests/test_frame_nal_adapter.py#L27): structural parent and follow-up rules;
+- [`test_semantic_relation_works_when_fields_differ()`](../tests/test_frame_nal_adapter.py#L38): semantic evidence despite different fields;
+- [`test_deep_nal_uses_content_without_parent_fields()`](../tests/test_frame_nal_adapter.py#L49): real content NAL reasoning without a parent;
+- [`test_deep_nal_uses_embedding_evidence_for_different_words()`](../tests/test_frame_nal_adapter.py#L67): semantic-neighbor evidence;
+- [`test_dependency_and_blocking_rules()`](../tests/test_frame_nal_adapter.py#L86): dependency and blocking rules;
+- [`test_content_propositions_infer_parentless_follow_up()`](../tests/test_frame_nal_adapter.py#L97): content-derived follow-up;
+- [`test_content_propositions_infer_supersedes()`](../tests/test_frame_nal_adapter.py#L112): content-derived supersession;
+- [`test_content_propositions_infer_same_failure_cluster()`](../tests/test_frame_nal_adapter.py#L126): shared failure classification;
+- [`test_relation_precedence_selects_strongest_category()`](../tests/test_frame_nal_adapter.py#L140): precedence selection;
+- [`test_relation_text_parser_preserves_reason()`](../tests/test_frame_nal_adapter.py#L161): Relation output parsing.
 
-The current focused result is:
+The latest focused result is:
 
 ```text
-6 passed
+10 passed
 ```
+
+The suite does not yet replace an end-to-end test through
+[`cfv2_compose_frame_relations()`](../src/frame_relation.py#L699) with a live or
+mocked Chroma collection and an asserted LLM fallback call. That is the next
+integration-level test to add.
 
 ## Next Symbolic Reasoning Work
 
 The current implementation establishes the Python, PeTTa, MeTTa, and NAL
-integration. More scenarios require richer grounding and more explicit NAL
-relations.
+integration. More scenarios require richer grounding, calibrated evidence, and
+broader relation rules.
 
-### 1. Replace token overlap with an ontology
+### 1. Expand and calibrate the ontology
 
-Simple words are not enough for robust reasoning. Introduce controlled concepts
-for:
+The current implementation has a first controlled synonym ontology. It should
+be expanded and validated against real frame data for:
 
 ```text
 actions, goals, entities, failures, causes, states, outputs
 ```
 
-For example, map `login`, `sign-in`, and `authentication` into a controlled
-concept family instead of relying on literal word overlap.
+Map terms such as `login`, `sign-in`, and `authentication` into a controlled
+concept family, and measure false positives and false negatives instead of
+relying only on literal overlap.
 
 ### 2. Ground relation propositions
 
-The adapter currently grounds concepts, not propositions such as:
+The adapter now grounds a first set of propositions such as `continues`,
+`follows-work`, `supersedes`, and `same-failure`. Extend the proposition
+extractor to cover:
 
 ```text
 continues(FrameA, FrameB)
@@ -399,24 +460,25 @@ caused-by(FrameA, FrameB)
 contradicts(FrameA, FrameB)
 ```
 
-These propositions are required for content-derived `FollowUp`, `Supersedes`,
-`SameFailureCluster`, and `Blocks`.
+These propositions are required for more reliable content-derived `FollowUp`,
+`Supersedes`, `SameFailureCluster`, and `Blocks`.
 
 ### 3. Add relation-specific NAL rules
 
-Add MeTTa rules and NAL truth calculations for:
+Extend the existing MeTTa rules and NAL truth calculations for:
 
-- content-derived follow-up without `parentID`;
+- stronger content-derived follow-up without `parentID`;
 - `Supersedes` based on action and contradiction evidence;
-- `SameFailureCluster` based on shared failure causes;
+- `SameFailureCluster` based on explicit shared failure causes;
 - content-derived `DependsOn` and `Blocks`;
 - revision when multiple frames provide conflicting evidence.
 
 ### 4. Use multi-hop inference
 
-Once propositions are grounded, use NAL deduction, induction, abduction,
-analogy, and revision across multiple hops. Keep hop limits and confidence
-thresholds explicit because truth confidence decreases as inference chains grow.
+The current adapter performs bounded multi-hop deduction through ontology chains.
+Extend this to use NAL deduction, induction, abduction, analogy, and revision
+across additional propositions. Keep hop limits and confidence thresholds
+explicit because truth confidence decreases as inference chains grow.
 
 ### 5. Define relation precedence
 

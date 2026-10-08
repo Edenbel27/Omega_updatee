@@ -39,6 +39,90 @@ else:
 _METTA = None
 _NAL_LOADED = False
 
+_ONTOLOGY = {
+    "authenticate": "authentication",
+    "authentication": "authentication",
+    "login": "authentication",
+    "logins": "authentication",
+    "sign-in": "authentication",
+    "signin": "authentication",
+    "fix": "remediate",
+    "repair": "remediate",
+    "resolve": "remediate",
+    "address": "remediate",
+    "investigate": "investigate",
+    "investigation": "investigate",
+    "debug": "investigate",
+    "diagnose": "investigate",
+    "analyze": "investigate",
+    "implement": "implement",
+    "implementation": "implement",
+    "build": "implement",
+    "create": "implement",
+    "develop": "implement",
+    "continue": "continue",
+    "continues": "continue",
+    "resume": "continue",
+    "followup": "continue",
+    "follow-up": "continue",
+    "revert": "supersede",
+    "rollback": "supersede",
+    "replace": "supersede",
+    "supersede": "supersede",
+    "failure": "failure",
+    "failures": "failure",
+    "failed": "failure",
+    "fail": "failure",
+    "error": "failure",
+    "errors": "failure",
+    "bug": "failure",
+    "issue": "failure",
+    "problem": "failure",
+    "timeout": "timeout",
+    "deployment": "deployment",
+    "deploy": "deployment",
+    "release": "deployment",
+    "rollout": "deployment",
+    "database": "database",
+    "db": "database",
+    "migration": "migration",
+    "network": "network",
+    "service": "service",
+}
+
+_ONTOLOGY_ALIAS_STRENGTH = {
+    "login": 0.82,
+    "logins": 0.82,
+    "sign-in": 0.80,
+    "signin": 0.80,
+    "fix": 0.82,
+    "repair": 0.84,
+    "resolve": 0.82,
+    "debug": 0.80,
+    "diagnose": 0.84,
+    "revert": 0.90,
+    "rollback": 0.88,
+    "replace": 0.84,
+    "error": 0.78,
+    "bug": 0.76,
+    "issue": 0.72,
+    "problem": 0.70,
+    "deploy": 0.82,
+    "release": 0.78,
+    "rollout": 0.78,
+    "db": 0.78,
+}
+
+_NAL_CONCEPT_CHAINS = (
+    ("authentication", "failure", "incident"),
+    ("timeout", "failure", "incident"),
+    ("deployment", "failure", "incident"),
+    ("database", "failure", "incident"),
+    ("investigate", "action", "work"),
+    ("remediate", "action", "work"),
+    ("implement", "action", "work"),
+)
+
 
 def _runtime():
     global _METTA, _NAL_LOADED
@@ -88,7 +172,7 @@ def infer_relations(
             )
             if relation["class"] in relation_classes
         )
-    return relations
+    return _deduplicate_relations(relations)
 
 
 def infer_content_relations(
@@ -99,26 +183,56 @@ def infer_content_relations(
     """Use real lib_nal |- abduction over concepts grounded from frame prose."""
     query_id = _symbol(query_frame["frameID"])
     candidate_id = _symbol(candidate_frame["frameID"])
-    query_concepts = _content_concepts(query_frame)
-    candidate_concepts = _content_concepts(candidate_frame)
-    shared_concepts = sorted(query_concepts & candidate_concepts)
+    query_evidence = _content_evidence(query_frame)
+    candidate_evidence = _content_evidence(candidate_frame)
+    shared_concepts = sorted(set(query_evidence) & set(candidate_evidence))
     semantic_score = max(
         0.0,
         min(1.0, float(candidate_frame.get("semanticScore", 0.0))),
     )
     if semantic_score >= 0.65:
         shared_concepts.append("semantic-neighbor")
+        query_evidence["semantic-neighbor"] = semantic_score
+        candidate_evidence["semantic-neighbor"] = semantic_score
     if not shared_concepts:
         return []
 
     runtime = _runtime()
     conclusions = []
     for concept in shared_concepts:
-        premise_a = _nal_inheritance(query_id, concept, 0.75)
-        premise_b = _nal_inheritance(candidate_id, concept, 0.75)
+        match_strength = min(
+            query_evidence[concept],
+            candidate_evidence[concept],
+        )
+        premise_a = _nal_inheritance(query_id, concept, match_strength)
+        premise_b = _nal_inheritance(candidate_id, concept, match_strength)
         expression = f"!(|- {premise_a} {premise_b})"
         result = runtime.process_metta_string(expression)
         conclusions.extend(_parse_nal_conclusions(result))
+
+    # Bound multi-hop reasoning to the small ontology chains above. Each hop
+    # is a real lib_nal deduction and its confidence is propagated forward.
+    for chain in _NAL_CONCEPT_CHAINS:
+        if not set(chain) & set(shared_concepts):
+            continue
+        for frame_id, concepts in (
+            (query_id, set(query_evidence)),
+            (candidate_id, set(candidate_evidence)),
+        ):
+            if chain[0] not in concepts:
+                continue
+            truth = _nal_inheritance(
+                frame_id,
+                chain[0],
+                _content_evidence(query_frame if frame_id == query_id else candidate_frame).get(chain[0], 0.7),
+            )
+            for source, target in zip(chain, chain[1:]):
+                implication = f"((==> {source} {target}) (stv 0.85 0.8))"
+                result = runtime.process_metta_string(
+                    f"!(|- {implication} {truth})"
+                )
+                conclusions.extend(_parse_nal_conclusions(result))
+                truth = f"((--> {frame_id} {target}) (stv 1.0 0.65))"
 
     if not conclusions or "RelatedButSeparate" not in relation_classes:
         return []
@@ -136,19 +250,77 @@ def infer_content_relations(
     }]
 
 
-def _content_concepts(frame: dict[str, Any]) -> set[str]:
-    text = " ".join((
-        str(frame.get("deliverable", "")),
-        str(frame.get("results", "")),
-        str(frame.get("dependencies", "")),
-    )).lower()
-    words = re.findall(r"[a-z][a-z0-9_]{2,}", text)
+def _content_evidence(frame: dict[str, Any]) -> dict[str, float]:
+    field_weights = (
+        ("deliverable", 1.0),
+        ("results", 0.9),
+        ("dependencies", 0.8),
+    )
     stopwords = {
         "and", "are", "for", "from", "into", "that", "the", "this",
         "with", "will", "have", "has", "was", "were", "then", "when",
         "after", "before", "completed", "active", "task", "result",
     }
-    return {word for word in words if word not in stopwords}
+    evidence: dict[str, float] = {}
+    for field, field_weight in field_weights:
+        words = re.findall(
+            r"[a-z][a-z0-9_]{2,}",
+            str(frame.get(field, "")).lower(),
+        )
+        for word in words:
+            if word in stopwords:
+                continue
+            concept = _ONTOLOGY.get(word, word)
+            alias_strength = _ONTOLOGY_ALIAS_STRENGTH.get(
+                word,
+                0.95 if word == concept else 0.60,
+            )
+            score = min(0.95, field_weight * alias_strength)
+            evidence[concept] = max(evidence.get(concept, 0.0), score)
+    return evidence
+
+
+def _content_concepts(frame: dict[str, Any]) -> set[str]:
+    return set(_content_evidence(frame))
+
+
+def _content_proposition_facts(
+    query_frame: dict[str, Any],
+    candidate_frame: dict[str, Any],
+) -> list[str]:
+    query_id = _symbol(query_frame["frameID"])
+    candidate_id = _symbol(candidate_frame["frameID"])
+    query_concepts = _content_concepts(query_frame)
+    candidate_concepts = _content_concepts(candidate_frame)
+    query_evidence = _content_evidence(query_frame)
+    candidate_evidence = _content_evidence(candidate_frame)
+    shared = query_concepts & candidate_concepts
+    facts = []
+
+    def add(predicate: str, base_confidence: float) -> None:
+        shared_strength = max(
+            (min(query_evidence[c], candidate_evidence[c]) for c in shared),
+            default=0.0,
+        )
+        confidence = min(0.95, base_confidence * (0.7 + 0.3 * shared_strength))
+        facts.append(
+            f"(content-proposition {query_id} {candidate_id} {predicate})"
+        )
+        facts.append(
+            f"((content-proposition {query_id} {candidate_id} {predicate}) "
+            f"(stv 1.0 {confidence:.4f}))"
+        )
+
+    if "continue" in query_concepts and ("investigate" in candidate_concepts or "implement" in candidate_concepts):
+        add("continues", 0.82)
+    if "supersede" in query_concepts and ("implement" in candidate_concepts or "remediate" in candidate_concepts):
+        add("supersedes", 0.84)
+    cause_concepts = {"authentication", "deployment", "database", "migration", "network", "service", "timeout"}
+    if "failure" in query_concepts and "failure" in candidate_concepts and shared & cause_concepts:
+        add("same-failure", 0.80)
+    if ("remediate" in query_concepts or "implement" in query_concepts) and "investigate" in candidate_concepts and shared:
+        add("follows-work", 0.78)
+    return facts
 
 
 def _nal_inheritance(frame_id: str, concept: str, confidence: float) -> str:
@@ -212,6 +384,7 @@ def build_query(
             f"((top-level {candidate_id}) (stv 1.0 0.9))"
         )
     facts = " ".join([facts, *pair_facts])
+    facts = " ".join([facts, *_content_proposition_facts(query_frame, candidate_frame)])
 
     return (
         f"!(classify-frame-pair {query_id} {candidate_id} "
