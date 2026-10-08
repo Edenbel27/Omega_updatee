@@ -214,21 +214,21 @@ def _parse_frame_sketches(compact_frames_repr: str) -> list[dict[str, Any]]:
 def _frame_document(frame: dict[str, Any]) -> str:
     # Embed meaning-bearing content; structural fields remain separate evidence.
     return (
-        f"Task: {frame['deliverable']}. "
-        f"Results: {frame['results']}. "
-        f"Dependencies: {frame['dependencies']}."
+        f"Task: {frame.get('deliverable', '')}. "
+        f"Results: {frame.get('results', '')}. "
+        f"Dependencies: {frame.get('dependencies', '')}."
     )
 
 
 def _frame_metadata(frame: dict[str, Any], provider: str, content_hash: str) -> dict[str, Any]:
     return {
-        "frameID": frame["frameID"],
-        "parentID": frame["parentID"],
-        "status": frame["status"],
-        "priority": float(frame["priority"]),
-        "source": frame["source"],
-        "mode": frame["mode"],
-        "dependencies": frame["dependencies"],
+        "frameID": frame.get("frameID", "UNKNOWN"),
+        "parentID": frame.get("parentID", "UNKNOWN"),
+        "status": frame.get("status", "UNKNOWN"),
+        "priority": float(frame.get("priority", 0.0)),
+        "source": frame.get("source", "UNKNOWN"),
+        "mode": frame.get("mode", "UNKNOWN"),
+        "dependencies": frame.get("dependencies", ""),
         "embeddingProvider": provider,
         "contentHash": content_hash,
     }

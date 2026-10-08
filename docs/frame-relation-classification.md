@@ -94,9 +94,10 @@ implementation adds these layers before the LLM fallback:
 1. [`_parse_frame_sketches()`](../src/frame_relation.py#L187) extracts frame
    fields, including dependencies.
 2. [`_frame_document()`](../src/frame_relation.py#L214) creates semantic text
-   from task, results, and dependencies.
+   from task, results, and dependencies, using safe defaults for missing content.
 3. ChromaDB stores vectors and metadata; content hashing avoids re-embedding
-   unchanged semantic documents.
+   unchanged semantic documents, and metadata uses safe defaults for incomplete
+   frames.
 4. [`_classify_relations_vector()`](../src/frame_relation.py#L503) detects
    likely duplicates.
 5. [`build_query()`](../src/frame_nal.py#L348) converts structural fields into
@@ -397,21 +398,35 @@ pytest tests/test_frame_nal_adapter.py -q
 
 The test file currently covers:
 
-- [`test_parent_and_follow_up_rules()`](../tests/test_frame_nal_adapter.py#L27): structural parent and follow-up rules;
-- [`test_semantic_relation_works_when_fields_differ()`](../tests/test_frame_nal_adapter.py#L38): semantic evidence despite different fields;
-- [`test_deep_nal_uses_content_without_parent_fields()`](../tests/test_frame_nal_adapter.py#L49): real content NAL reasoning without a parent;
-- [`test_deep_nal_uses_embedding_evidence_for_different_words()`](../tests/test_frame_nal_adapter.py#L67): semantic-neighbor evidence;
-- [`test_dependency_and_blocking_rules()`](../tests/test_frame_nal_adapter.py#L86): dependency and blocking rules;
-- [`test_content_propositions_infer_parentless_follow_up()`](../tests/test_frame_nal_adapter.py#L97): content-derived follow-up;
-- [`test_content_propositions_infer_supersedes()`](../tests/test_frame_nal_adapter.py#L112): content-derived supersession;
-- [`test_content_propositions_infer_same_failure_cluster()`](../tests/test_frame_nal_adapter.py#L126): shared failure classification;
-- [`test_relation_precedence_selects_strongest_category()`](../tests/test_frame_nal_adapter.py#L140): precedence selection;
-- [`test_relation_text_parser_preserves_reason()`](../tests/test_frame_nal_adapter.py#L161): Relation output parsing.
+- [`test_parent_and_follow_up_rules()`](../tests/test_frame_nal_adapter.py#L28): structural parent and follow-up rules;
+- [`test_semantic_relation_works_when_fields_differ()`](../tests/test_frame_nal_adapter.py#L39): semantic evidence despite different fields;
+- [`test_deep_nal_uses_content_without_parent_fields()`](../tests/test_frame_nal_adapter.py#L50): real content NAL reasoning without a parent;
+- [`test_deep_nal_uses_embedding_evidence_for_different_words()`](../tests/test_frame_nal_adapter.py#L68): semantic-neighbor evidence;
+- [`test_dependency_and_blocking_rules()`](../tests/test_frame_nal_adapter.py#L87): dependency and blocking rules;
+- [`test_content_propositions_infer_parentless_follow_up()`](../tests/test_frame_nal_adapter.py#L98): content-derived follow-up;
+- [`test_content_propositions_infer_supersedes()`](../tests/test_frame_nal_adapter.py#L113): content-derived supersession;
+- [`test_content_propositions_infer_same_failure_cluster()`](../tests/test_frame_nal_adapter.py#L127): shared failure classification;
+- [`test_relation_precedence_selects_strongest_category()`](../tests/test_frame_nal_adapter.py#L141): precedence selection;
+- [`test_relation_text_parser_preserves_reason()`](../tests/test_frame_nal_adapter.py#L162): Relation output parsing;
+- [`test_vector_tier_passes_duplicate_threshold()`](../tests/test_frame_nal_adapter.py#L177): vector-tier success;
+- [`test_vector_tier_rejects_non_duplicate_distance()`](../tests/test_frame_nal_adapter.py#L188): vector-tier rejection;
+- [`test_structural_nal_fails_without_parent_evidence()`](../tests/test_frame_nal_adapter.py#L199): structural-tier rejection;
+- [`test_content_nal_fails_without_shared_evidence()`](../tests/test_frame_nal_adapter.py#L209): content-tier rejection;
+- [`test_unresolved_candidate_reaches_llm()`](../tests/test_frame_nal_adapter.py#L219): LLM fallback success;
+- [`test_resolved_nal_candidate_skips_llm()`](../tests/test_frame_nal_adapter.py#L256): LLM fallback bypass.
+- [`test_parent_of_rule_passes_for_inverse_parent_fact()`](../tests/test_frame_nal_adapter.py#L290): inverse parent relation;
+- [`test_continuation_of_rule_passes_for_matching_completed_top_level_frame()`](../tests/test_frame_nal_adapter.py#L300): continuation relation;
+- [`test_same_project_rule_passes_for_independent_active_frames()`](../tests/test_frame_nal_adapter.py#L310): same-project relation;
+- [`test_content_hash_reuses_unchanged_embedding()`](../tests/test_frame_nal_adapter.py#L320): hash-based embedding reuse;
+- [`test_content_hash_reembeds_changed_document()`](../tests/test_frame_nal_adapter.py#L348): hash invalidation and re-embedding;
+- [`test_chroma_search_returns_nearest_historical_frame()`](../tests/test_frame_nal_adapter.py#L369): mocked Chroma retrieval;
+- [`test_missing_fields_do_not_create_parent_or_dependency_facts()`](../tests/test_frame_nal_adapter.py#L394): missing-field safety;
+- [`test_compose_frame_relations_serializes_end_to_end_result()`](../tests/test_frame_nal_adapter.py#L408): end-to-end orchestration and Relation serialization.
 
 The latest focused result is:
 
 ```text
-10 passed
+24 passed
 ```
 
 The suite does not yet replace an end-to-end test through
